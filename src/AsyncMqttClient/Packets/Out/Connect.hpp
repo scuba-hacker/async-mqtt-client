@@ -6,6 +6,7 @@
 #include "OutPacket.hpp"
 #include "../../Flags.hpp"
 #include "../../Helpers.hpp"
+#include "../../PSRAMBufferPool.hpp"
 
 namespace AsyncMqttClientInternals {
 class ConnectOutPacket : public OutPacket {
@@ -24,6 +25,11 @@ class ConnectOutPacket : public OutPacket {
   size_t size() const;
 
  private:
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  uint8_t* _psramBuffer;
+  size_t _psramSize;
+#else
   std::vector<uint8_t> _data;
+#endif
 };
 }  // namespace AsyncMqttClientInternals

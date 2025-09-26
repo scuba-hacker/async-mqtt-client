@@ -59,6 +59,11 @@ AsyncMqttClient::AsyncMqttClient()
   _clientId = _generatedClientId;
 
   setMaxTopicLength(128);
+
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  // PSRAM buffer pool will be initialized lazily when first needed
+  // This avoids initialization failures during early boot process
+#endif
 }
 
 AsyncMqttClient::~AsyncMqttClient() {
@@ -68,6 +73,12 @@ AsyncMqttClient::~AsyncMqttClient() {
   _pendingPubRels.clear();
   _pendingPubRels.shrink_to_fit();
   _clearQueue(false);  // _clear() doesn't clear session data
+
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  // Cleanup PSRAM buffer pool
+  PSRAMBufferPool::cleanup();
+#endif
+
 #ifdef ESP32
   vSemaphoreDelete(_xSemaphore);
 #endif

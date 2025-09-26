@@ -49,6 +49,7 @@
 #include "AsyncMqttClient/Packets/Out/Subscribe.hpp"
 #include "AsyncMqttClient/Packets/Out/Unsubscribe.hpp"
 #include "AsyncMqttClient/Packets/Out/Publish.hpp"
+#include "AsyncMqttClient/PSRAMBufferPool.hpp"
 
 class AsyncMqttClient {
  public:

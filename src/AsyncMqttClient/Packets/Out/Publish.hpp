@@ -7,6 +7,7 @@
 #include "../../Flags.hpp"
 #include "../../Helpers.hpp"
 #include "../../Storage.hpp"
+#include "../../PSRAMBufferPool.hpp"
 
 namespace AsyncMqttClientInternals {
 class PublishOutPacket : public OutPacket {
@@ -18,6 +19,11 @@ class PublishOutPacket : public OutPacket {
   void setDup();  // you cannot unset dup
 
  private:
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  uint8_t* _psramBuffer;
+  size_t _psramSize;
+#else
   std::vector<uint8_t> _data;
+#endif
 };
 }  // namespace AsyncMqttClientInternals

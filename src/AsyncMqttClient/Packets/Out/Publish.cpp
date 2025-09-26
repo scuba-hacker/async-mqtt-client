@@ -2,7 +2,11 @@
 
 using AsyncMqttClientInternals::PublishOutPacket;
 
-PublishOutPacket::PublishOutPacket(const char* topic, uint8_t qos, bool retain, const char* payload, size_t length) {
+PublishOutPacket::PublishOutPacket(const char* topic, uint8_t qos, bool retain, const char* payload, size_t length)
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+: _psramBuffer(nullptr), _psramSize(0)
+#endif
+{
   char fixedHeader[5];
   fixedHeader[0] = AsyncMqttClientInternals::PacketType.PUBLISH;
   fixedHeader[0] = fixedHeader[0] << 4;
@@ -39,13 +43,52 @@ PublishOutPacket::PublishOutPacket(const char* topic, uint8_t qos, bool retain, 
   if (qos != 0) neededSpace += 2;
   if (payload != nullptr) neededSpace += payloadLength;
 
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  // Get buffer from PSRAM pool - MUST succeed when PSRAM is enabled
+  uint8_t* psramBuffer = PSRAMBufferPool::allocate(neededSpace);
+  size_t bufferOffset = 0;
+
+  if (!psramBuffer) {
+    // Intentionally cause crash rather than fall back to heap
+    abort();
+  }
+#else
+  // Use regular vector allocation
   _data.reserve(neededSpace);
+#endif
 
   _packetId = (qos !=0) ? _getNextPacketId() : 1;
   char packetIdBytes[2];
   packetIdBytes[0] = _packetId >> 8;
   packetIdBytes[1] = _packetId & 0xFF;
 
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  // Copy data directly to PSRAM buffer
+  memcpy(psramBuffer + bufferOffset, fixedHeader, 1 + remainingLengthLength);
+  bufferOffset += 1 + remainingLengthLength;
+
+  memcpy(psramBuffer + bufferOffset, topicLengthBytes, 2);
+  bufferOffset += 2;
+
+  memcpy(psramBuffer + bufferOffset, topic, topicLength);
+  bufferOffset += topicLength;
+
+  if (qos != 0) {
+    memcpy(psramBuffer + bufferOffset, packetIdBytes, 2);
+    bufferOffset += 2;
+    _released = false;
+  }
+
+  if (payload != nullptr) {
+    memcpy(psramBuffer + bufferOffset, payload, payloadLength);
+    bufferOffset += payloadLength;
+  }
+
+  // Store PSRAM buffer pointer and size directly
+  _psramBuffer = psramBuffer;
+  _psramSize = neededSpace;
+#else
+  // Use original vector insertion method
   _data.insert(_data.end(), fixedHeader, fixedHeader + 1 + remainingLengthLength);
   _data.insert(_data.end(), topicLengthBytes, topicLengthBytes + 2);
   _data.insert(_data.end(), topic, topic + topicLength);
@@ -54,16 +97,29 @@ PublishOutPacket::PublishOutPacket(const char* topic, uint8_t qos, bool retain, 
     _released = false;
   }
   if (payload != nullptr) _data.insert(_data.end(), payload, payload + payloadLength);
+#endif
 }
 
 const uint8_t* PublishOutPacket::data(size_t index) const {
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  return _psramBuffer + index;
+#else
   return &_data.data()[index];
+#endif
 }
 
 size_t PublishOutPacket::size() const {
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  return _psramSize;
+#else
   return _data.size();
+#endif
 }
 
 void PublishOutPacket::setDup() {
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  _psramBuffer[0] |= AsyncMqttClientInternals::HeaderFlag.PUBLISH_DUP;
+#else
   _data[0] |= AsyncMqttClientInternals::HeaderFlag.PUBLISH_DUP;
+#endif
 }

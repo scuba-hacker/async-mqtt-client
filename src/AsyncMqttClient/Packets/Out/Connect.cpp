@@ -11,7 +11,11 @@ ConnectOutPacket::ConnectOutPacket(bool cleanSession,
                                    const char* willPayload,
                                    uint16_t willPayloadLength,
                                    uint16_t keepAlive,
-                                   const char* clientId) {
+                                   const char* clientId)
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+: _psramBuffer(nullptr), _psramSize(0)
+#endif
+{
   char fixedHeader[5];
   fixedHeader[0] = AsyncMqttClientInternals::PacketType.CONNECT;
   fixedHeader[0] = fixedHeader[0] << 4;
@@ -116,8 +120,71 @@ ConnectOutPacket::ConnectOutPacket(bool cleanSession,
     neededSpace += passwordLength;
   }
 
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  // Get buffer from PSRAM pool and use it to build the packet
+  uint8_t* psramBuffer = PSRAMBufferPool::allocate(neededSpace);
+  size_t bufferOffset = 0;
+#else
+  // Use regular vector allocation
   _data.reserve(neededSpace);
+#endif
 
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  // Copy data directly to PSRAM buffer
+  memcpy(psramBuffer + bufferOffset, fixedHeader, 1 + remainingLengthLength);
+  bufferOffset += 1 + remainingLengthLength;
+
+  psramBuffer[bufferOffset++] = protocolNameLengthBytes[0];
+  psramBuffer[bufferOffset++] = protocolNameLengthBytes[1];
+
+  psramBuffer[bufferOffset++] = 'M';
+  psramBuffer[bufferOffset++] = 'Q';
+  psramBuffer[bufferOffset++] = 'T';
+  psramBuffer[bufferOffset++] = 'T';
+
+  psramBuffer[bufferOffset++] = protocolLevel[0];
+  psramBuffer[bufferOffset++] = connectFlags[0];
+  psramBuffer[bufferOffset++] = keepAliveBytes[0];
+  psramBuffer[bufferOffset++] = keepAliveBytes[1];
+  psramBuffer[bufferOffset++] = clientIdLengthBytes[0];
+  psramBuffer[bufferOffset++] = clientIdLengthBytes[1];
+
+  memcpy(psramBuffer + bufferOffset, clientId, clientIdLength);
+  bufferOffset += clientIdLength;
+
+  if (willTopic != nullptr) {
+    memcpy(psramBuffer + bufferOffset, willTopicLengthBytes, 2);
+    bufferOffset += 2;
+    memcpy(psramBuffer + bufferOffset, willTopic, willTopicLength);
+    bufferOffset += willTopicLength;
+
+    memcpy(psramBuffer + bufferOffset, willPayloadLengthBytes, 2);
+    bufferOffset += 2;
+    if (willPayload != nullptr) {
+      memcpy(psramBuffer + bufferOffset, willPayload, willPayloadLength);
+      bufferOffset += willPayloadLength;
+    }
+  }
+  if (username != nullptr) {
+    memcpy(psramBuffer + bufferOffset, usernameLengthBytes, 2);
+    bufferOffset += 2;
+    memcpy(psramBuffer + bufferOffset, username, usernameLength);
+    bufferOffset += usernameLength;
+  }
+  if (password != nullptr) {
+    memcpy(psramBuffer + bufferOffset, passwordLengthBytes, 2);
+    bufferOffset += 2;
+    memcpy(psramBuffer + bufferOffset, password, passwordLength);
+    bufferOffset += passwordLength;
+  }
+
+  // Store PSRAM buffer pointer and size directly
+  _psramBuffer = psramBuffer;
+  _psramSize = neededSpace;
+
+  // Vector should remain empty when using PSRAM
+#else
+  // Use original vector insertion method
   _data.insert(_data.end(), fixedHeader, fixedHeader + 1 + remainingLengthLength);
 
   _data.push_back(protocolNameLengthBytes[0]);
@@ -151,12 +218,21 @@ ConnectOutPacket::ConnectOutPacket(bool cleanSession,
     _data.insert(_data.end(), passwordLengthBytes, passwordLengthBytes + 2);
     _data.insert(_data.end(), password, password + passwordLength);
   }
+#endif
 }
 
 const uint8_t* ConnectOutPacket::data(size_t index) const {
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  return _psramBuffer + index;
+#else
   return &_data.data()[index];
+#endif
 }
 
 size_t ConnectOutPacket::size() const {
+#if ASYNCMQTT_USE_PSRAM_BUFFER
+  return _psramSize;
+#else
   return _data.size();
+#endif
 }
